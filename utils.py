@@ -39,7 +39,10 @@ def same_domain(url, base):
 
 
 def collect_links_from_home(base_url):
-    raw = get_raw_data(base_url)
+    try:
+        raw = get_raw_data(base_url)
+    except Exception:
+        return []
     soup = BeautifulSoup(raw, "html.parser")
     links = set()
     for a in soup.find_all("a", href=True):
@@ -53,7 +56,10 @@ def collect_links_from_home(base_url):
 
 
 def collect_candidates_from_home(base_url):
-    raw = get_raw_data(base_url)
+    try:
+        raw = get_raw_data(base_url)
+    except Exception:
+        return []
     soup = BeautifulSoup(raw, "html.parser")
     candidates = []
     seen = set()
@@ -72,7 +78,10 @@ def collect_candidates_from_home(base_url):
 
 
 def discover_city_sections(base_url):
-    raw = get_raw_data(base_url)
+    try:
+        raw = get_raw_data(base_url)
+    except Exception:
+        return []
     soup = BeautifulSoup(raw, "html.parser")
     sections = set()
     for a in soup.find_all("a", href=True):
@@ -196,12 +205,18 @@ INCLUDE_PATHS = (
 )
 INCLUDE_KEYWORDS = [
     "furto",
+    "tentativas",
+    "violência",
+    "ameaça",
+    "golpe",
+    "fraude",
     "roubo",
     "assalto",
     "acidente",
     "colisão",
     "colisao",
     "atropelamento",
+    "atropelar",
     "trânsito",
     "transito",
     "vandalismo",
@@ -211,6 +226,7 @@ INCLUDE_KEYWORDS = [
     "violência sexual",
     "violencia sexual",
     "abuso sexual",
+    "abuso",
     "exploração sexual",
     "exploracao sexual",
     "homicídio",
@@ -226,8 +242,10 @@ CITY_KEYWORDS = [
     "são paulo",
     "sao paulo",
     "rio de janeiro",
+    "minas gerais",
     "rj",
     "sp",
+    "mg"
 ]
 EXCLUDE_KEYWORDS = ["opinião", "opinia", "coluna", "patrocinado", "esportes", "futebol"]
 
@@ -498,6 +516,14 @@ def extract_neighborhood_from_list(text: str, city_hint: str = None):
         if not re.search(rf"\b{re.escape(key)}\b", norm):
             continue
         entries = NEIGHBORHOOD_INDEX[key]
+        # avoid matching very short neighborhood names (e.g. 'Sé' -> 'se')
+        # when they may appear as part of other words (e.g. 'Sérgio').
+        # Require an explicit neighborhood indicator in the original text
+        # for very short keys to reduce false positives.
+        if len(key) <= 2:
+            lower = (text or "").lower()
+            if not re.search(r"\bbairro\b|\bno bairro\b|\bna bairro\b|\bno bairro\b|\bem o bairro\b", lower):
+                continue
         if city_hint:
             for entry in entries:
                 if entry["cidade"] == city_hint:
@@ -646,7 +672,7 @@ def extract_article_fields(url):
     }
 
 
-def scrape_security_articles(base_url, max_articles=100, delay=2, pages_feed=4, require_neighborhood=False):
+def scrape_security_articles(base_url, max_articles=150, delay=2, pages_feed=10, require_neighborhood=False):
     # collect titles/resumes first, then fetch full article only when the candidate matches
     candidates = collect_candidates_from_feeds(base_url, pages=pages_feed)
     candidates.extend(collect_candidates_from_home(base_url))
@@ -672,15 +698,20 @@ def scrape_security_articles(base_url, max_articles=100, delay=2, pages_feed=4, 
             if require_neighborhood and not bairro:
                 continue
 
-            data["pagina_obtida"] = href
-            data["pagina_coleta"] = candidate.get("source_page")
-            data["termo_encontrado"] = matched_term
-            data["cidade_encontrada"] = (
+            cidade_encontrada = (
                 detect_city(candidate)
                 or detect_city({"title": data.get("titulo"), "resume": data.get("subtitulo"), "url": href})
                 or cidade_bairro
                 or None
             )
+
+            if not matched_term or not cidade_encontrada or not bairro:
+                continue
+
+            data["pagina_obtida"] = href
+            data["pagina_coleta"] = candidate.get("source_page")
+            data["termo_encontrado"] = matched_term
+            data["cidade_encontrada"] = cidade_encontrada
             data["bairro_encontrado"] = bairro
             results.append(data)
 
